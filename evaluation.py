@@ -4,6 +4,7 @@ import json, re, sys, abc, argparse, math
 import numpy as np
 from typing import Any, Dict, List, Tuple
 from dataclasses import dataclass
+from tqdm import tqdm
 
 import intervaltree
 
@@ -19,8 +20,8 @@ class GoldCorpus:
         
         # Train/dev/test splits
         self.splits = {}
-        
-        fd = open(gold_standard_json_file)
+
+        fd = open(gold_standard_json_file, encoding="utf-8")
         annotated_docs = json.load(fd)
         fd.close()
         print("Reading annotated corpus with %i documents"%len(annotated_docs))
@@ -89,7 +90,7 @@ class GoldCorpus:
         
     #    print("Computing weighted, token-level precision on %i documents"%len(masked_docs))
         
-        for doc in masked_docs:
+        for doc in tqdm(masked_docs):
             gold_doc = self.documents[doc.doc_id]
             
             # We extract the list of token-level spans
@@ -525,6 +526,7 @@ if __name__ == "__main__":
         
         recall_direct_entities = gold_corpus.get_recall(masked_docs, True, False)
         recall_quasi_entities = gold_corpus.get_recall(masked_docs, False, True)
+        recall_total = gold_corpus.get_recall(masked_docs)
         
         if args.token_weighting == "uniform":
             weighting_scheme = UniformTokenWeighting()
@@ -537,5 +539,6 @@ if __name__ == "__main__":
     
         print("==> Entity-level recall on direct identifiers: %.3f"%recall_direct_entities)
         print("==> Entity-level recall on quasi identifiers: %.3f"%recall_quasi_entities)
+        print("==> Entity-level recall total: %.3f" % recall_total)
         print("==> Weighted, token-level precision on all identifiers: %.3f"%weighted_token_precision)
         
