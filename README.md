@@ -13,6 +13,8 @@ The corpus comprises 1,268 English-language court cases from the [European Court
 ## Data format
 The data is distributed in a standoff JSON format consisting of a list of document object with the following information:
 
+| Variable name | Description |
+|---------------|-------------|
 | annotations | an object with document annotations, each containing an object with entity mention annotations |
 | dataset_type | which data split the court case belongs to (train /dev / test) |
 | doc_id | the ID of the court case (e.g. “001-61807”) |
@@ -23,6 +25,8 @@ The data is distributed in a standoff JSON format consisting of a list of docume
 
 Each entity mention object under 'annotations' has the following attributes:
 
+| Variable name | Description |
+|---------------|-------------|
 | entity_type | the semantic category of the entity (e.g. PERSON) |
 | entity_mention_id | ID of the entity mention |
 | start_offset | start character offset of the annotated span |
@@ -35,4 +39,8 @@ Each entity mention object under 'annotations' has the following attributes:
 
 ## License
 
+skweak is released under an MIT License.
 
+The MIT License is a short and simple permissive license allowing both commercial and non-commercial use of the software. The only requirement is to preserve the copyright and license notices (see file [License](https://github.com/NorskRegnesentral/text-anonymisation-benchmark/blob/master/LICENSE.txt)). Licensed works, modifications, and larger works may be distributed under different terms and without source code.
+
+ 

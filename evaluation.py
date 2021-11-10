@@ -4,6 +4,7 @@ import json, re, sys, abc, argparse, math
 import numpy as np
 from typing import Any, Dict, List, Tuple
 from dataclasses import dataclass
+from tqdm import tqdm
 
 import intervaltree
 
@@ -30,8 +31,8 @@ class GoldCorpus:
         
         # Train/dev/test splits
         self.splits = {}
-        
-        fd = open(gold_standard_json_file)
+
+        fd = open(gold_standard_json_file, encoding="utf-8")
         annotated_docs = json.load(fd)
         fd.close()
         print("Reading annotated corpus with %i documents"%len(annotated_docs))
@@ -135,7 +136,7 @@ class GoldCorpus:
         
     #    print("Computing weighted, token-level precision on %i documents"%len(masked_docs))
         
-        for doc in masked_docs:
+        for doc in tqdm(masked_docs):
             gold_doc = self.documents[doc.doc_id]
             
             # We extract the list of token-level spans
@@ -594,7 +595,7 @@ if __name__ == "__main__":
         for masked_doc in masked_docs:
             if masked_doc.doc_id not in gold_corpus.documents:
                 raise RuntimeError("Document %s not present in gold corpus"%masked_doc.doc_id)
-               
+
         if args.token_weighting == "uniform":
             weighting_scheme = UniformTokenWeighting()
         elif args.token_weighting == "bert":
