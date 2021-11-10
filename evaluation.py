@@ -7,6 +7,17 @@ from dataclasses import dataclass
 
 import intervaltree
 
+# Tokens that can be ignored from the recall scores (because they
+# do not carry much semantic content, and there are discrepancies on
+# whether to include them in the annotated spans or no)
+TOKENS_TO_IGNORE_IN_COUNTS = ["Mr", "Mrs", "Ms", "and", "or", "from", "until", "to", 
+                              "about", "after", "as", "at", "before", "between", "by",
+                              "during", "for", "in", "into", "of", "on", "over", "since",
+                              "with", "the", "a", "an"]
+patterns_to_skip = ["\\b" + re.escape(tok) + "\\b" for tok in TOKENS_TO_IGNORE_IN_COUNTS]
+patterns_to_skip += [re.escape(punct) for punct in list(",.-;:/&()[]–'\" ")]
+regex_to_skip = re.compile("(?:" + "|".join(patterns_to_skip) + ")", re.IGNORECASE)
+
 
 class GoldCorpus:
     """Representation of a gold standard corpus for text anonymisation, extracted from a
@@ -43,7 +54,7 @@ class GoldCorpus:
             self.splits[data_split] = self.splits.get(data_split, []) + [ann_doc["doc_id"]]
           
             
-    def get_recall(self, masked_docs:List[MaskedDocument], include_direct=True, 
+    def get_entity_recall(self, masked_docs:List[MaskedDocument], include_direct=True, 
                        include_quasi=True):
         """Returns the entity-level recall of the masked spans when compared to the gold 
         standard annotations. Arguments:
@@ -73,7 +84,42 @@ class GoldCorpus:
                     
         return nb_masked_entities / nb_entities
     
+      
+            
+    def get_mention_recall(self, masked_docs:List[MaskedDocument], include_direct=True, 
+                       include_quasi=True):
+        """Returns the mention-level recall of the masked spans when compared to the gold 
+        standard annotations. Arguments:
+        - masked_docs: documents together with spans masked by the system
+        - include_direct: whether to include direct identifiers in the metric
+        - include_quasi: whether to include quasi identifiers in the metric
+                
+        If annotations from several annotators are available for a given document, the recall 
+        corresponds to a micro-average over the annotators. """
+
+        nb_masked_mentions = 0
+        nb_mentions = 0
+
+   #     print("Computing mention-level recall on %i documents"%len(masked_docs),
+   #           ("(include direct identifiers: %s, include quasi identifiers: %s)"
+   #           %(include_direct, include_quasi)))
+
+        for doc in masked_docs:
+            
+            gold_doc = self.documents[doc.doc_id]
+            for entity in gold_doc.get_entities_to_mask(include_direct, include_quasi):
+                
+                masked_mentions = gold_doc.get_masked_mentions(doc, entity)
+                s1 = [gold_doc.text[start:end] for start, end in entity.mentions]
+                s2 = [gold_doc.text[start:end] for start, end in masked_mentions]
+                if s1!= s2:
+                    print(s1, s2)
+                nb_masked_mentions += len(masked_mentions)
+                nb_mentions +=  sum(entity.mention_level_masking)
+                    
+        return nb_masked_mentions / nb_mentions
     
+        
     def get_precision(self, masked_docs:List[MaskedDocument], token_weighting:TokenWeighting):
         """Returns the weighted, token-level precision of the masked spans when compared 
         to the gold standard annotations. Arguments:
@@ -201,38 +247,57 @@ class GoldDocument:
         
         covered_entities = set()
         
-        # We compute the set of all character indices that are masked by the system
-        covered_offsets = {i for start, end in masked_doc.masked_spans 
-                           for i in range(start, end)}
-        
         for entity in self.get_entities_to_mask(include_direct, include_quasi):
-                
-            # For each entity, we determine the set of all character indices that should
-            # be masked to consider the entity as properly masked
-            offsets_to_mask = set()
-            for incr, (mention_start, mention_end) in enumerate(entity.mentions):
-                
-                # The masking is sometimes inconsistent for the same entity, so we 
-                # verify that the mention does need masking
-                if entity.mention_level_masking[incr]:
-                    offsets_to_mask.update(range(mention_start, mention_end))
             
-            # We compute the character indices that are not covered
-            non_covered_offsets = offsets_to_mask - covered_offsets
+            masked_mentions = self.get_masked_mentions(masked_doc, entity)
             
-            # If that set is empty, we consider the entity as properly masked
-            if len(non_covered_offsets) == 0:
-                covered_entities.add(entity.entity_id)
-
-            # Corner case: if a few indices are not masked, but they only concern 
-            # non-alphanumeric characters (punctuation, white space), we consider
-            # it as masked as well
-            elif all(not self.text[offset].isalnum() for offset in non_covered_offsets):
-                covered_entities.add(entity.entity_id)
+            for incr, mention in enumerate(entity.mentions):
                 
+                if mention in masked_mentions:
+                    continue
+            
+                # The masking is sometimes inconsistent for the same entity, 
+                # so we verify that the mention does need masking
+                elif entity.mention_level_masking[incr]:
+                    break
+            else:
+                covered_entities.add(entity.entity_id)
+                                  
         return covered_entities
     
+  
+    def get_masked_mentions(self, masked_doc:MaskedDocument, entity: AnnotatedEntity):
+        """Given a document with a set of masked text spans and a particular entity ID, 
+        determines which mentions of that entity are fully masked. """
+        
+        covered_mentions = set()
+            
+        for mention_start, mention_end in entity.mentions:
+                
+            mention_to_mask = self.text[mention_start:mention_end].lower()
+                
+            # Computes the character offsets that must be masked
+            offsets_to_mask = set(range(mention_start, mention_end))
+
+            # Removes offsets that may be skipped
+
+            # We build the set of character offsets that are not covered
+            non_covered_offsets = offsets_to_mask - masked_doc.get_masked_offsets()
+            
+            # If we have not covered everything, we also make sure punctuations
+            # spaces, titles are ignored
+            if len(non_covered_offsets) > 0:
+                for to_skip in regex_to_skip.finditer(mention_to_mask):
+                    non_covered_offsets -= set(range(mention_start+to_skip.start(0), 
+                                                     mention_start+to_skip.end(0)))
+
+            # If that set is empty, we consider the mention as properly masked
+            if len(non_covered_offsets) == 0:
+                covered_mentions.add((mention_start, mention_end))
+                
+        return covered_mentions
     
+        
     def get_entities_to_mask(self,  include_direct=True, include_quasi=True):
         """Return entities that should be masked, and satisfy the constraints 
         specified as arguments"""
@@ -294,6 +359,15 @@ class MaskedDocument:
     
     doc_id: str
     masked_spans : List[Tuple[int, int]]
+    
+    def get_masked_offsets(self):
+        """Returns the character offsets that are masked"""
+        if not hasattr(self, "masked_offsets"):
+            self.masked_offsets = {i for start, end in self.masked_spans 
+                                   for i in range(start, end)}
+        return self.masked_offsets
+        
+        
     
 
 @dataclass
@@ -520,12 +594,7 @@ if __name__ == "__main__":
         for masked_doc in masked_docs:
             if masked_doc.doc_id not in gold_corpus.documents:
                 raise RuntimeError("Document %s not present in gold corpus"%masked_doc.doc_id)
-        
-        print("Computing evaluation metrics for", masked_output_file, "(%i documents)"%len(masked_docs))
-        
-        recall_direct_entities = gold_corpus.get_recall(masked_docs, True, False)
-        recall_quasi_entities = gold_corpus.get_recall(masked_docs, False, True)
-        
+               
         if args.token_weighting == "uniform":
             weighting_scheme = UniformTokenWeighting()
         elif args.token_weighting == "bert":
@@ -533,8 +602,15 @@ if __name__ == "__main__":
         else:
             raise RuntimeError("Unrecognised weighting scheme:", args.token_weighting)
         
+        print("Computing evaluation metrics for", masked_output_file, "(%i documents)"%len(masked_docs))
+        print("Weighting scheme:", args.token_weighting)
+        
+        mention_recall = gold_corpus.get_mention_recall(masked_docs, True, True)
+        recall_direct_entities = gold_corpus.get_entity_recall(masked_docs, True, False)
+        recall_quasi_entities = gold_corpus.get_entity_recall(masked_docs, False, True)
         weighted_token_precision = gold_corpus.get_precision(masked_docs, weighting_scheme)
-    
+
+        print("==> Mention-level recall on all identifiers: %.3f"%mention_recall)
         print("==> Entity-level recall on direct identifiers: %.3f"%recall_direct_entities)
         print("==> Entity-level recall on quasi identifiers: %.3f"%recall_quasi_entities)
         print("==> Weighted, token-level precision on all identifiers: %.3f"%weighted_token_precision)
