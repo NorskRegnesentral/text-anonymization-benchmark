@@ -111,55 +111,55 @@ class GoldCorpus:
             for entity in gold_doc.get_entities_to_mask(include_direct, include_quasi):
                 
                 masked_mentions = gold_doc.get_masked_mentions(doc, entity)
-                s1 = [gold_doc.text[start:end] for start, end in entity.mentions]
-                s2 = [gold_doc.text[start:end] for start, end in masked_mentions]
-                if s1!= s2:
-                    print(s1, s2)
                 nb_masked_mentions += len(masked_mentions)
                 nb_mentions +=  sum(entity.mention_level_masking)
                     
         return nb_masked_mentions / nb_mentions
     
         
-    def get_precision(self, masked_docs:List[MaskedDocument], token_weighting:TokenWeighting):
+    def get_precision(self, masked_docs:List[MaskedDocument], token_weighting:TokenWeighting, 
+                      token_level:bool=True):
         """Returns the weighted, token-level precision of the masked spans when compared 
         to the gold standard annotations. Arguments:
         - masked_docs: documents together with spans masked by the system
         - token_weighting: mechanism for weighting the information content of each token
         
-        The precision is computed at the level of tokens, and is weighted by its information
-        content. If annotations from several annotators are available for a given document, 
-        the precision corresponds to a micro-average over the annotators."""      
+        If token_level is set to true, the precision is computed at the level of tokens, 
+        otherwise the precision is at the mention-level. The masked spans/tokens are weighted 
+        by their information content, given the provided weighting scheme. If annotations from 
+        several annotators are available for a given document, the precision corresponds to a 
+        micro-average over the annotators."""      
         
         weighted_true_positives = 0.0
-        weighted_masked_tokens = 0.0
-        
-    #    print("Computing weighted, token-level precision on %i documents"%len(masked_docs))
-        
+        weighted_system_masks = 0.0
+                
         for doc in tqdm(masked_docs):
             gold_doc = self.documents[doc.doc_id]
             
-            # We extract the list of token-level spans
-            masked_tokens = []
+            # We extract the list of spans (token- or mention-level)
+            system_masks = []
             for start, end in doc.masked_spans:
-                masked_tokens += list(gold_doc.split_by_tokens(start, end))
+                if token_level:
+                    system_masks += list(gold_doc.split_by_tokens(start, end))
+                else:
+                    system_masks += [(start,end)]
             
-            # We compute the weights (information content) of each token
-            weights = token_weighting.get_weights(gold_doc.text, masked_tokens)
+            # We compute the weights (information content) of each mask
+            weights = token_weighting.get_weights(gold_doc.text, system_masks)
             
             # We store the number of annotators in the gold standard document
             nb_annotators = len(set(entity.annotator for entity in gold_doc.entities.values()))
             
-            for (start, end), weight in zip(masked_tokens, weights):
+            for (start, end), weight in zip(system_masks, weights):
                 
-                # We extract the annotators that have also masked this token
+                # We extract the annotators that have also masked this token/span
                 annotators = gold_doc.get_annotators_for_span(start, end)
                 
                 # And update the (weighted) counts
                 weighted_true_positives += (len(annotators) * weight)
-                weighted_masked_tokens += (nb_annotators * weight)
+                weighted_system_masks += (nb_annotators * weight)
         
-        return weighted_true_positives / weighted_masked_tokens
+        return weighted_true_positives / weighted_system_masks
                          
             
 
@@ -610,9 +610,11 @@ if __name__ == "__main__":
         recall_direct_entities = gold_corpus.get_entity_recall(masked_docs, True, False)
         recall_quasi_entities = gold_corpus.get_entity_recall(masked_docs, False, True)
         weighted_token_precision = gold_corpus.get_precision(masked_docs, weighting_scheme)
+        unweighted_mention_precision = gold_corpus.get_precision(masked_docs, UniformTokenWeighting(), False)
 
         print("==> Mention-level recall on all identifiers: %.3f"%mention_recall)
         print("==> Entity-level recall on direct identifiers: %.3f"%recall_direct_entities)
         print("==> Entity-level recall on quasi identifiers: %.3f"%recall_quasi_entities)
         print("==> Weighted, token-level precision on all identifiers: %.3f"%weighted_token_precision)
+        print("==> Weighted, mention-level precision on all identifiers: %.3f"%unweighted_mention_precision)
         
