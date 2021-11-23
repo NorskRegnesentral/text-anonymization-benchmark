@@ -446,6 +446,7 @@ class BertTokenWeighting(TokenWeighting):
         # STEP 1: we tokenise the text
         bert_tokens = self.tokeniser(text, return_offsets_mapping=True)
         input_ids = bert_tokens["input_ids"]
+        input_ids_copy = np.array(input_ids)
         
         # STEP 2: we record the mapping between spans and BERT tokens
         bert_token_spans = bert_tokens["offset_mapping"]
@@ -460,21 +461,20 @@ class BertTokenWeighting(TokenWeighting):
           
         # STEP 4: we run the masked language model     
         logits = self._get_model_predictions(input_ids, attention_mask)
+        unnorm_probs = torch.exp(logits)
+        probs = unnorm_probs / torch.sum(unnorm_probs, axis=1)[:,None]
         
-        # We are only interested in the scores for the actual token values
-        scores = logits[torch.arange(len(input_ids)), input_ids]
-        scores = scores.detach().cpu().numpy()
-        
+        # We are only interested in the probs for the actual token values
+        probs_actual = probs[torch.arange(len(input_ids)), input_ids_copy]
+        probs_actual = probs_actual.detach().cpu().numpy()
+              
         # STEP 5: we compute the weights from those predictions
         weights = []
         for (span_start, span_end) in text_spans:
             
-            # We normalise the prediction scores for each BERT token
-            # to a probability. If the span comprises several BERT tokens, 
-            # we then take the mininum probability
-            probs = [1/(1+np.exp(-scores[token_idx])) 
-                     for token_idx in tokens_by_span[(span_start, span_end)]]
-            prob = np.min(probs)
+            # if the span has several tokens, we take the minimum prob
+            prob = np.min([probs_actual[token_idx] for token_idx in 
+                           tokens_by_span[(span_start, span_end)]])
             
             # We finally define the weight as -log(p)
             weights.append(-np.log(prob))
@@ -610,11 +610,11 @@ if __name__ == "__main__":
         recall_direct_entities = gold_corpus.get_entity_recall(masked_docs, True, False)
         recall_quasi_entities = gold_corpus.get_entity_recall(masked_docs, False, True)
         weighted_token_precision = gold_corpus.get_precision(masked_docs, weighting_scheme)
-        unweighted_mention_precision = gold_corpus.get_precision(masked_docs, UniformTokenWeighting(), False)
+        weighted_mention_precision = gold_corpus.get_precision(masked_docs, weighting_scheme, False)
 
         print("==> Mention-level recall on all identifiers: %.3f"%mention_recall)
         print("==> Entity-level recall on direct identifiers: %.3f"%recall_direct_entities)
         print("==> Entity-level recall on quasi identifiers: %.3f"%recall_quasi_entities)
         print("==> Weighted, token-level precision on all identifiers: %.3f"%weighted_token_precision)
-        print("==> Weighted, mention-level precision on all identifiers: %.3f"%unweighted_mention_precision)
+        print("==> Weighted, mention-level precision on all identifiers: %.3f"%weighted_mention_precision)
         
