@@ -11,10 +11,10 @@ import intervaltree
 # Tokens that can be ignored from the recall scores (because they
 # do not carry much semantic content, and there are discrepancies on
 # whether to include them in the annotated spans or no)
-TOKENS_TO_IGNORE_IN_COUNTS = ["Mr", "Mrs", "Ms", "and", "or", "from", "until", "to", 
+TOKENS_TO_IGNORE_IN_COUNTS = ["mr", "mrs", "ms", "and", "or", "from", "until", "to", 
                               "about", "after", "as", "at", "before", "between", "by",
                               "during", "for", "in", "into", "of", "on", "over", "since",
-                              "with", "the", "a", "an"]
+                              "with", "the", "a", "an", "no", "nr"]
 patterns_to_skip = ["\\b" + re.escape(tok) + "\\b" for tok in TOKENS_TO_IGNORE_IN_COUNTS]
 patterns_to_skip += [re.escape(punct) for punct in list(",.-;:/&()[]–'\" ")]
 regex_to_skip = re.compile("(?:" + "|".join(patterns_to_skip) + ")", re.IGNORECASE)
