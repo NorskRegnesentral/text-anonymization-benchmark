@@ -158,11 +158,12 @@ class GoldCorpus:
                     elif not is_partial_match and not include_no_match:
                         continue
                     
-                    print("==> Not masked:", gold_doc.text[not_masked_start:not_masked_end])
-                    context = masked_text[max(0, not_masked_start-30): not_masked_end+30]
-                    print("Context:", context)
-                    print("(doc_id %s, span [%i-%i])"%
+                    print("Mention:", gold_doc.text[not_masked_start:not_masked_end],
+                          "(doc_id %s, span [%i-%i])"%
                           (gold_doc.doc_id, not_masked_start, not_masked_end))
+                    context = masked_text[max(0, not_masked_start-30): not_masked_end+30]
+                    context = re.sub("\s\s+", " ", context.replace("\n", " "), re.DOTALL)
+                    print("Context:", context)
                     print("=============")
                     
         
