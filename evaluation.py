@@ -14,9 +14,9 @@ import intervaltree
 TOKENS_TO_IGNORE_IN_COUNTS = ["mr", "mrs", "ms", "and", "or", "from", "until", "to", 
                               "about", "after", "as", "at", "before", "between", "by",
                               "during", "for", "in", "into", "of", "on", "over", "since",
-                              "with", "the", "a", "an", "no", "nr"]
+                              "with", "the", "a", "an", "no", "nr", "’s", "'s"]
 patterns_to_skip = ["\\b" + re.escape(tok) + "\\b" for tok in TOKENS_TO_IGNORE_IN_COUNTS]
-patterns_to_skip += [re.escape(punct) for punct in list(",.-;:/&()[]–'\" ")]
+patterns_to_skip += [re.escape(punct) for punct in list(",.-;:/&()[]–'\" ’“”")]
 regex_to_skip = re.compile("(?:" + "|".join(patterns_to_skip) + ")", re.IGNORECASE)
 
 
@@ -127,9 +127,16 @@ class GoldCorpus:
     
     
     def show_false_negatives(self, masked_docs:List[MaskedDocument], include_direct=True, 
-                       include_quasi=True):
+                       include_quasi=True, include_partial_match=True, include_no_match=True):
         """Prints out the false negatives (mentions that should have been masked but
-        haven't) to facilitate error analysis"""
+        haven't) to facilitate error analysis.
+        If include_partial_match is set to True, we include mentions which are partially 
+        masked. If include_no_match is set to True, we include mentions that are not
+        masked at all. 
+        """
+        
+        if not include_partial_match and not include_no_match:
+            raise RuntimeError("Must include some match to display")
         
         for doc in masked_docs:
             
@@ -145,10 +152,16 @@ class GoldCorpus:
                 not_masked_spans = sorted(set(entity.mentions) - set(masked_mentions))
                 for not_masked_start, not_masked_end in not_masked_spans:
                     
+                    is_partial_match = "*" in masked_text[not_masked_start:not_masked_end]
+                    if is_partial_match and not include_partial_match:
+                        continue
+                    elif not is_partial_match and not include_no_match:
+                        continue
+                    
                     print("==> Not masked:", gold_doc.text[not_masked_start:not_masked_end])
                     context = masked_text[max(0, not_masked_start-30): not_masked_end+30]
                     print("Context:", context)
-                    print("(doc %s, span [%i-%i])"%
+                    print("(doc_id %s, span [%i-%i])"%
                           (gold_doc.doc_id, not_masked_start, not_masked_end))
                     print("=============")
                     
