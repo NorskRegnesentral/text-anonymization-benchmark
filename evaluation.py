@@ -518,6 +518,11 @@ class BertTokenWeighting(TokenWeighting):
         weights = []
         for (span_start, span_end) in text_spans:
             
+            # If the span does not include any actual token, skip
+            if not tokens_by_span[(span_start, span_end)]:
+                weights.append(0)
+                continue
+            
             # if the span has several tokens, we take the minimum prob
             prob = np.min([probs_actual[token_idx] for token_idx in 
                            tokens_by_span[(span_start, span_end)]])
@@ -526,7 +531,6 @@ class BertTokenWeighting(TokenWeighting):
             weights.append(-np.log(prob))
         
         return weights
-        
 
     def _get_tokens_by_span(self, bert_token_spans, text_spans):
         """Given two lists of spans (one with the spans of the BERT tokens, and one with
@@ -545,9 +549,9 @@ class BertTokenWeighting(TokenWeighting):
                 tokens_by_span[(span_start, span_end)].append(token_idx) 
         
         # And control that everything is correct
-        for span in text_spans:
-            if len(tokens_by_span[span])==0 :
-                raise RuntimeError("Span (%i,%i) without any token"%(span_start, span_end))
+        for span_start, span_end in text_spans:
+            if len(tokens_by_span[(span_start, span_end)])==0 :
+                print("Warning: span (%i,%i) without any token"%(span_start, span_end))
         return tokens_by_span        
     
     
@@ -590,10 +594,7 @@ class BertTokenWeighting(TokenWeighting):
         else:
             scores = scores[0]
         
-        return scores
-        
-        
-        
+        return scores     
 
 
 def get_masked_docs_from_file(masked_output_file:str):
@@ -630,7 +631,7 @@ if __name__ == "__main__":
                         help='the path to the JSON file containing the actual spans masked by the system')
     parser.add_argument('--use_bert', dest='token_weighting', action='store_const', const="bert", default="uniform", 
                         help='use BERT to compute the information content of each content (default: disable weighting)')
-    parser.add_argument("--only-docs", dest="only_docs", default=None, nargs="*",
+    parser.add_argument("--only_docs", dest="only_docs", default=None, nargs="*",
                        help="list of document identifiers on which to focus the evaluation " +
                        "(if not specified, computes the evaluation measures for all documents)")
     parser.add_argument("--verbose", dest="verbose", action="store_true", default=False,
