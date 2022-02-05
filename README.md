@@ -4,6 +4,12 @@ The _Text Anonymization Benchmark_ (TAB) is a new, open-source corpus for text a
 * confidential attributes,
 * co-reference relations.
 
+Details about the annotation process employed to develop this corpus can be found in the following paper: 
+
+
+> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Ildikó Pilán, Pierre Lison, Lilja Øvrelid, Anthi Papadopoulou, David Sánchez, Montserrat Batet. <br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[The Text Anonymization Benchmark (TAB): A Dedicated Corpus and Evaluation Framework for Text Anonymization](https://arxiv.org/abs/2202.00443),<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;_arXiv:2202.00443_.
 
 ## General information
 
