@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json, re, sys, abc, argparse, math
 import numpy as np
 from typing import Any, Dict, List, Tuple
@@ -21,6 +19,59 @@ patterns_to_skip = ["\\b" + re.escape(tok) + "\\b" for tok in TOKENS_TO_IGNORE_I
 patterns_to_skip += [re.escape(punct) for punct in list(",.-;:/&()[]–'\" ’“”")]
 regex_to_skip = re.compile("(?:" + "|".join(patterns_to_skip) + ")", re.IGNORECASE)
 
+@dataclass
+class MaskedDocument:
+    """Represents a document in which some text spans are masked, each span
+    being expressed by their (start, end) character boundaries"""
+
+    doc_id: str
+    masked_spans : List[Tuple[int, int]]
+
+    def get_masked_offsets(self):
+        """Returns the character offsets that are masked"""
+        if not hasattr(self, "masked_offsets"):
+            self.masked_offsets = {i for start, end in self.masked_spans
+                                   for i in range(start, end)}
+        return self.masked_offsets
+
+
+class TokenWeighting:
+    """Abstract class for token weighting schemes (used to compute the precision)"""
+
+    @abc.abstractmethod
+    def get_weights(self, text:str, text_spans:List[Tuple[int,int]]):
+        """Given a text and a list of text spans, returns a list of numeric weights
+        (of same length as the list of spans) representing the information content
+        conveyed by each span.
+
+        A weight close to 0 represents a span with low information content (i.e. which
+        can be easily predicted from the remaining context), while a weight close to 1
+        represents a high information content (which is difficult to predict from the
+        context)"""
+
+        return
+
+@dataclass
+class AnnotatedEntity:
+    """Represents an entity annotated in a document, with a unique identifier,
+    a list of mentions (character-level spans in the document), whether it
+    needs to be masked, and whether it corresponds to a direct identifier"""
+
+    entity_id: str
+    mentions: List[Tuple[int, int]]
+    need_masking: bool
+    is_direct: bool
+    entity_type: str
+    mention_level_masking: List[bool]
+
+    def __post_init__(self):
+        if self.is_direct and not self.need_masking:
+            raise RuntimeError("Direct identifiers must always be masked")
+
+    @property
+    def mentions_to_mask(self):
+        return [mention for i, mention in enumerate(self.mentions)
+                if self.mention_level_masking[i]]
 
 class GoldCorpus:
     """Representation of a gold standard corpus for text anonymisation, extracted from a
@@ -86,9 +137,10 @@ class GoldCorpus:
             masked_entities = [entity for entity in entities_to_mask if gold_doc.is_masked(doc, entity)]
             nb_masked_entities += len(masked_entities)
             nb_entities +=  len(entities_to_mask)
-                    
-        return nb_masked_entities / nb_entities
-    
+        try:
+            return nb_masked_entities / nb_entities
+        except ZeroDivisionError:
+            return 0
       
             
     def get_recall(self, masked_docs:List[MaskedDocument], include_direct=True, 
@@ -123,8 +175,10 @@ class GoldCorpus:
                         nb_masked_elements += 1
                     nb_elements += 1
                 
-        return nb_masked_elements / nb_elements
-
+        try:
+            return nb_masked_elements / nb_elements
+        except ZeroDivisionError:
+            return 0
 
     def get_recall_per_entity_type(self, masked_docs:List[MaskedDocument], include_direct=True, 
                                    include_quasi=True, token_level:bool=True):
@@ -249,9 +303,10 @@ class GoldCorpus:
                 # And update the (weighted) counts
                 weighted_true_positives += (len(annotators) * weight)
                 weighted_system_masks += (nb_annotators * weight)
-        
-        return weighted_true_positives / weighted_system_masks
-                         
+        try:
+            return weighted_true_positives / weighted_system_masks
+        except ZeroDivisionError:
+            return 0
             
 
 
@@ -371,7 +426,6 @@ class GoldDocument:
 
         # If that set is empty, we consider the mention as properly masked
         return len(non_covered_offsets) == 0
-        
     
         
     def get_entities_to_mask(self,  include_direct=True, include_quasi=True):
@@ -425,66 +479,9 @@ class GoldDocument:
             start_token = start + match.start(0)
             end_token = start + match.end(0)
             yield start_token, end_token
-                       
-
-  
-@dataclass          
-class MaskedDocument:
-    """Represents a document in which some text spans are masked, each span
-    being expressed by their (start, end) character boundaries"""
-    
-    doc_id: str
-    masked_spans : List[Tuple[int, int]]
-    
-    def get_masked_offsets(self):
-        """Returns the character offsets that are masked"""
-        if not hasattr(self, "masked_offsets"):
-            self.masked_offsets = {i for start, end in self.masked_spans 
-                                   for i in range(start, end)}
-        return self.masked_offsets
-        
-        
-    
-
-@dataclass
-class AnnotatedEntity:
-    """Represents an entity annotated in a document, with a unique identifier, 
-    a list of mentions (character-level spans in the document), whether it 
-    needs to be masked, and whether it corresponds to a direct identifier"""
-    
-    entity_id: str
-    mentions: List[Tuple[int, int]]
-    need_masking: bool
-    is_direct: bool
-    entity_type: str
-    mention_level_masking: List[bool]
-    
-    def __post_init__(self):
-        if self.is_direct and not self.need_masking:
-            raise RuntimeError("Direct identifiers must always be masked") 
-        
-    @property
-    def mentions_to_mask(self):
-        return [mention for i, mention in enumerate(self.mentions) 
-                if self.mention_level_masking[i]] 
 
 
-class TokenWeighting:
-    """Abstract class for token weighting schemes (used to compute the precision)"""
-    
-    @abc.abstractmethod
-    def get_weights(self, text:str, text_spans:List[Tuple[int,int]]):
-        """Given a text and a list of text spans, returns a list of numeric weights
-        (of same length as the list of spans) representing the information content 
-        conveyed by each span. 
-        
-        A weight close to 0 represents a span with low information content (i.e. which
-        can be easily predicted from the remaining context), while a weight close to 1
-        represents a high information content (which is difficult to predict from the
-        context)"""
-        
-        return
-    
+
 class UniformTokenWeighting(TokenWeighting):
     """Uniform weighting (all tokens assigned to a weight of 1.0)"""
     def get_weights(self, text:str, text_spans:List[Tuple[int,int]]):
