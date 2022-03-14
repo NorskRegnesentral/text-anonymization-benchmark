@@ -45,7 +45,7 @@ Each entity mention object under 'annotations' has the following attributes:
 
 ## License
 
-skweak is released under an MIT License.
+TAB is released under an MIT License.
 
 The MIT License is a short and simple permissive license allowing both commercial and non-commercial use of the software. The only requirement is to preserve the copyright and license notices (see file [License](https://github.com/NorskRegnesentral/text-anonymisation-benchmark/blob/master/LICENSE.txt)). Licensed works, modifications, and larger works may be distributed under different terms and without source code.
 
