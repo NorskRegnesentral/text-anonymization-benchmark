@@ -606,11 +606,13 @@ class BertTokenWeighting(TokenWeighting):
             nb_segments = math.ceil(nb_tokens/self.max_segment_size)
             
             # Split the input_ids (and add padding if necessary)
-            input_ids_splits = torch.tensor_split(input_ids[0], nb_segments)
+            split_pos = [self.max_segment_size * (i + 1) for i in range(nb_segments - 1)]
+            input_ids_splits = torch.tensor_split(input_ids[0], split_pos)
+
             input_ids = torch.nn.utils.rnn.pad_sequence(input_ids_splits, batch_first=True)
             
             # Split the attention masks
-            attention_mask_splits = torch.tensor_split(attention_mask[0], nb_segments)
+            attention_mask_splits = torch.tensor_split(attention_mask[0], split_pos)
             attention_mask = torch.nn.utils.rnn.pad_sequence(attention_mask_splits, batch_first=True)
                    
         # Run the model on the tokenised inputs + attention mask
