@@ -687,24 +687,16 @@ if __name__ == "__main__":
 
         if args.verbose:
             gold_corpus.show_false_negatives(masked_docs, True, True)
-            
-        if args.token_weighting == "uniform":
-            weighting_scheme = UniformTokenWeighting()
-        elif args.token_weighting == "bert":
-            weighting_scheme = BertTokenWeighting()
-        else:
-            raise RuntimeError("Unrecognised weighting scheme:", args.token_weighting)
         
         print("Computing evaluation metrics for", masked_output_file, "(%i documents)"%len(masked_docs))
-        print("Weighting scheme:", args.token_weighting)
         
         token_recall = gold_corpus.get_recall(masked_docs, True, True, True)
         token_recall_by_type = gold_corpus.get_recall_per_entity_type(masked_docs, True, True, True)
         mention_recall = gold_corpus.get_recall(masked_docs, True, True, False)
         recall_direct_entities = gold_corpus.get_entity_recall(masked_docs, True, False)
         recall_quasi_entities = gold_corpus.get_entity_recall(masked_docs, False, True)
-        weighted_token_precision = gold_corpus.get_precision(masked_docs, weighting_scheme)
-        weighted_mention_precision = gold_corpus.get_precision(masked_docs, weighting_scheme, False)
+        token_precision = gold_corpus.get_precision(masked_docs, UniformTokenWeighting())
+        mention_precision = gold_corpus.get_precision(masked_docs, UniformTokenWeighting(), False)  
 
         print("==> Token-level recall on all identifiers: %.3f"%token_recall)
         print("==> Token-level recall on all identifiers, factored by type:")
@@ -713,6 +705,20 @@ if __name__ == "__main__":
         print("==> Mention-level recall on all identifiers: %.3f"%mention_recall)
         print("==> Entity-level recall on direct identifiers: %.3f"%recall_direct_entities)
         print("==> Entity-level recall on quasi identifiers: %.3f"%recall_quasi_entities)
-        print("==> Weighted, token-level precision on all identifiers: %.3f"%weighted_token_precision)
-        print("==> Weighted, mention-level precision on all identifiers: %.3f"%weighted_mention_precision)
+        print("==> Uniform token-level precision on all identifiers: %.3f"%token_precision)
+        print("==> Uniform mention-level precision on all identifiers: %.3f"%mention_precision)  
+                     
+        if args.token_weighting == "uniform":
+            weighting_scheme = UniformTokenWeighting()
+        elif args.token_weighting == "bert":
+            weighting_scheme = BertTokenWeighting()
+        else:
+            raise RuntimeError("Unrecognised weighting scheme:", args.token_weighting)
+        
+        if not type(weighting_scheme) == UniformTokenWeighting:
+            print("Weighting scheme:", args.token_weighting)              
+            weighted_token_precision = gold_corpus.get_precision(masked_docs, weighting_scheme)
+            weighted_mention_precision = gold_corpus.get_precision(masked_docs, weighting_scheme, False)
+            print("==> Weighted, token-level precision on all identifiers: %.3f"%weighted_token_precision)
+            print("==> Weighted, mention-level precision on all identifiers: %.3f"%weighted_mention_precision)
         
