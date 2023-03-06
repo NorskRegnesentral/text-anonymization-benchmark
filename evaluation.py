@@ -4,20 +4,16 @@ from typing import Any, Dict, List, Tuple
 from dataclasses import dataclass
 from tqdm import tqdm
 import pandas
+import spacy
 
 import intervaltree
 
-
-# Tokens that can be ignored from the recall scores (because they
-# do not carry much semantic content, and there are discrepancies on
-# whether to include them in the annotated spans or no)
-TOKENS_TO_IGNORE_IN_COUNTS = ["mr", "mrs", "ms", "and", "or", "from", "until", "to", 
-                              "about", "after", "as", "at", "before", "between", "by",
-                              "during", "for", "in", "into", "of", "on", "over", "since",
-                              "with", "the", "a", "an", "no", "nr", "’s", "'s"]
-patterns_to_skip = ["\\b" + re.escape(tok) + "\\b" for tok in TOKENS_TO_IGNORE_IN_COUNTS]
-patterns_to_skip += [re.escape(punct) for punct in list(",.-;:/&()[]–'\" ’“”")]
-regex_to_skip = re.compile("(?:" + "|".join(patterns_to_skip) + ")", re.IGNORECASE)
+# POS tags, tokens or characters that can be ignored from the recall scores 
+# (because they do not carry much semantic content, and there are discrepancies
+# on whether to include them in the annotated spans or not)
+POS_TO_IGNORE = {"ADP", "PART", "CCONJ", "DET"} 
+TOKENS_TO_IGNORE = {"mr", "mrs", "ms", "no", "nr", "about"}
+CHARACTERS_TO_IGNORE = " ,.-;:/&()[]–'\" ’“”"                
 
 @dataclass
 class MaskedDocument:
@@ -77,7 +73,10 @@ class GoldCorpus:
     """Representation of a gold standard corpus for text anonymisation, extracted from a
     JSON file. See annotation guidelines for the TAB corpus for details. """
     
-    def __init__(self, gold_standard_json_file:str):
+    def __init__(self, gold_standard_json_file:str, spacy_model = "en_core_web_md"):
+        
+        # Loading the spacy model
+        nlp = spacy.load(spacy_model)
         
         # documents indexed by identifier
         self.documents = {}
@@ -99,13 +98,19 @@ class GoldCorpus:
                 if key not in ann_doc:
                     raise RuntimeError("Annotated document is not well formed: missing variable %s"%key)
             
+            # Parsing the document with spacy
+            spacy_doc = nlp(ann_doc["text"])
+            
             # Creating the actual document (identifier, text and annotations)          
-            new_doc = GoldDocument(ann_doc["doc_id"], ann_doc["text"], ann_doc["annotations"])
+            new_doc = GoldDocument(ann_doc["doc_id"], ann_doc["text"], 
+                                   ann_doc["annotations"], spacy_doc)
             self.documents[ann_doc["doc_id"]] = new_doc
             
             # Adding it to the list for the specified split (train, dev or test)
             data_split = ann_doc["dataset_type"]
             self.splits[data_split] = self.splits.get(data_split, []) + [ann_doc["doc_id"]]
+        
+        
           
             
     def get_entity_recall(self, masked_docs:List[MaskedDocument], include_direct=True, 
@@ -157,23 +162,11 @@ class GoldCorpus:
         If annotations from several annotators are available for a given document, the recall 
         corresponds to a micro-average over the annotators. """
 
-        nb_masked_elements = 0
-        nb_elements = 0
-
-        for doc in masked_docs:
-            
-            gold_doc = self.documents[doc.doc_id]
-            for entity in gold_doc.get_entities_to_mask(include_direct, include_quasi):
-                
-                spans = list(entity.mentions)
-                if token_level:
-                    spans = [(token_start, token_end) for start, end in spans 
-                             for token_start, token_end in gold_doc.split_by_tokens(start, end)]
-                
-                for span_start, span_end in spans:
-                    if gold_doc.is_mention_masked(doc, span_start, span_end):
-                        nb_masked_elements += 1
-                    nb_elements += 1
+        nb_masked_by_type, nb_by_type = self._get_mask_counts(masked_docs, include_direct, 
+                                                                  include_quasi, token_level)
+        
+        nb_masked_elements = sum(nb_masked_by_type.values())
+        nb_elements = sum(nb_by_type.values())
                 
         try:
             return nb_masked_elements / nb_elements
@@ -194,14 +187,23 @@ class GoldCorpus:
         If annotations from several annotators are available for a given document, the recall 
         corresponds to a micro-average over the annotators. """
         
+        nb_masked_by_type, nb_by_type = self._get_mask_counts(masked_docs, include_direct, 
+                                                                  include_quasi, token_level)
+        
+        return {ent_type:nb_masked_by_type[ent_type]/nb_by_type[ent_type]
+                for ent_type in nb_by_type}
+
                 
+    def _get_mask_counts(self, masked_docs:List[MaskedDocument], include_direct=True, 
+                                   include_quasi=True, token_level:bool=True):
+        
         nb_masked_elements_by_type = {}
         nb_elements_by_type = {}
         
         for doc in masked_docs:
-            gold_doc = self.documents[doc.doc_id]
             
-            for entity in gold_doc.get_entities_to_mask(True, True):
+            gold_doc = self.documents[doc.doc_id]           
+            for entity in gold_doc.get_entities_to_mask(include_direct, include_quasi):
                 
                 if entity.entity_type not in nb_elements_by_type:
                     nb_elements_by_type[entity.entity_type] = 0
@@ -217,10 +219,9 @@ class GoldCorpus:
                         nb_masked_elements_by_type[entity.entity_type] += 1
                     nb_elements_by_type[entity.entity_type] += 1
         
-        return {ent_type:nb_masked_elements_by_type[ent_type]/nb_elements_by_type[ent_type]
-                for ent_type in nb_elements_by_type}
+        return nb_masked_elements_by_type, nb_elements_by_type
              
-    
+            
     def show_false_negatives(self, masked_docs:List[MaskedDocument], include_direct=True, 
                        include_quasi=True, include_partial_match=True, include_no_match=True):
         """Prints out the false negatives (mentions that should have been masked but
@@ -313,13 +314,15 @@ class GoldCorpus:
 class GoldDocument:
     """Representation of an annotated document"""
     
-    def __init__(self, doc_id:str, text:str, annotations:Dict[str,List]):
+    def __init__(self, doc_id:str, text:str, annotations:Dict[str,List],
+                 spacy_doc: spacy.tokens.Doc):
         """Creates a new annotated document with an identifier, a text content, and 
         a set of annotations (see guidelines)"""
         
-        # The (unique) document identifier and its text
+        # The (unique) document identifier, its text and the spacy document
         self.doc_id = doc_id
         self.text = text
+        self.spacy_doc = spacy_doc
         
         # Annotated entities (indexed by id)
         self.entities = {}        
@@ -420,9 +423,13 @@ class GoldDocument:
         # If we have not covered everything, we also make sure punctuations
         # spaces, titles, etc. are ignored
         if len(non_covered_offsets) > 0:
-            for to_skip in regex_to_skip.finditer(mention_to_mask):
-                non_covered_offsets -= set(range(mention_start+to_skip.start(0), 
-                                                mention_start+to_skip.end(0)))
+            span = self.spacy_doc.char_span(mention_start, mention_end, alignment_mode = "expand")
+            for token in span:
+                if token.pos_ in POS_TO_IGNORE or token.lower_ in TOKENS_TO_IGNORE:
+                    non_covered_offsets -= set(range(token.idx, token.idx+len(token)))
+        for i in list(non_covered_offsets):
+            if self.text[i] in set(CHARACTERS_TO_IGNORE):
+                non_covered_offsets.remove(i)
 
         # If that set is empty, we consider the mention as properly masked
         return len(non_covered_offsets) == 0
