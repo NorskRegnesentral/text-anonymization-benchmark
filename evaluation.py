@@ -257,7 +257,7 @@ class GoldCorpus:
                             "(doc_id %s, span [%i-%i])"%
                             (gold_doc.doc_id, mention_start, mention_end))
                         context = masked_text[max(0, mention_start-30): mention_end+30]
-                        context = re.sub("\s\s+", " ", context.replace("\n", " "), re.DOTALL)
+                        context = re.sub(r"\s\s+", " ", context.replace("\n", " "), re.DOTALL)
                         print("Context:", context)
                         print("=============")
                     
@@ -482,7 +482,7 @@ class GoldDocument:
     def split_by_tokens(self, start: int, end: int):
         """Generates the (start, end) boundaries of each token included in this span"""
         
-        for match in re.finditer("\w+", self.text[start:end]):
+        for match in re.finditer(r"\w+", self.text[start:end]):
             start_token = start + match.start(0)
             end_token = start + match.end(0)
             yield start_token, end_token
