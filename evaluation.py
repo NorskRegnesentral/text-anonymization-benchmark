@@ -29,7 +29,31 @@ class MaskedDocument:
             self.masked_offsets = {i for start, end in self.masked_spans
                                    for i in range(start, end)}
         return self.masked_offsets
+    
 
+    def mask_from_gold(self, gold_doc, partial=False):
+        
+        new_doc = MaskedDocument(self.doc_id, [])
+        for masked_start, masked_end in self.masked_spans:
+            for entity in gold_doc.entities.values():
+                for mention_start, mention_end in entity.mentions:
+                    if masked_start <= mention_start and masked_end >= mention_end:
+                        new_doc.masked_spans.append((mention_start, mention_end))
+                    elif partial and mention_start < masked_end and mention_end > masked_start:
+                        new_doc.masked_spans.append((mention_start, mention_end))
+        return new_doc            
+
+
+    def intersect_masks(self, other_mask, partial=False):
+        
+        new_doc = MaskedDocument(self.doc_id, [])
+        for masked_start, masked_end in self.masked_spans:
+            for (other_mask_start, other_mask_end), _ in other_mask.masked_spans:
+                if masked_start <= other_mask_start and masked_end >= other_mask_end:
+                    new_doc.masked_spans.append((other_mask_start, other_mask_end))
+                elif partial and other_mask_start < masked_end and other_mask_end > masked_start:
+                    new_doc.masked_spans.append((other_mask_start, other_mask_end))
+        return new_doc            
 
 class TokenWeighting:
     """Abstract class for token weighting schemes (used to compute the precision)"""
@@ -305,7 +329,7 @@ class GoldCorpus:
                 weighted_true_positives += (len(annotators) * weight)
                 weighted_system_masks += (nb_annotators * weight)
         try:
-            return weighted_true_positives / weighted_system_masks
+            return float(weighted_true_positives / weighted_system_masks)
         except ZeroDivisionError:
             return 0
             
@@ -381,6 +405,8 @@ class GoldDocument:
                 new_entity = AnnotatedEntity(entity_id, [(start, end)], need_masking, is_direct, 
                                              mention["entity_type"], [need_masking])
                 entities[entity_id] = new_entity
+            
+            entities[entity_id].covered = set(range(start, end))
                 
         for entity in entities.values():
             if set(entity.mention_level_masking) != {entity.need_masking}:
@@ -486,6 +512,8 @@ class GoldDocument:
             start_token = start + match.start(0)
             end_token = start + match.end(0)
             yield start_token, end_token
+
+
 
 
 
@@ -663,6 +691,45 @@ def get_masked_docs_from_file(masked_output_file:str):
     return masked_docs
     
 
+def evaluate(gold_corpus, masked_docs:List[MaskedDocument], use_bert=False, verbose=False, rounding=3):
+
+    print("=========")
+
+    for masked_doc in masked_docs:
+        if masked_doc.doc_id not in gold_corpus.documents:
+            raise RuntimeError("Document %s not present in gold corpus"%masked_doc.doc_id)
+
+    if verbose:
+        gold_corpus.show_false_negatives(masked_docs, True, True)
+    
+    print("Computing evaluation metrics for %i documents"%len(masked_docs))
+
+    measures = {"token_recall":gold_corpus.get_recall(masked_docs, True, True, True),
+            "token_recall_by_type":gold_corpus.get_recall_per_entity_type(masked_docs, True, True, True),
+            "mention_recall":gold_corpus.get_recall(masked_docs, True, True, False),
+            "recall_all_entities":gold_corpus.get_entity_recall(masked_docs, True, True),
+            "recall_direct_entities":gold_corpus.get_entity_recall(masked_docs, True, False),
+            "recall_quasi_entities":gold_corpus.get_entity_recall(masked_docs, False, True),
+            "token_precision":gold_corpus.get_precision(masked_docs, UniformTokenWeighting()),
+            "mention_precision":gold_corpus.get_precision(masked_docs, UniformTokenWeighting(), False)}
+    
+    measures["token_f1"] = 2*measures["token_precision"]*measures["token_recall"] / (measures["token_precision"] + measures["token_recall"])
+                    
+    if use_bert:
+        weighting_scheme = BertTokenWeighting()
+        measures["weighted_token_precision"] = gold_corpus.get_precision(masked_docs, weighting_scheme)
+        measures["weighted_mention_precision"] = gold_corpus.get_precision(masked_docs, weighting_scheme, False)
+
+    for k, v in measures.items():
+        if type(v)==float:
+            measures[k] = round(v, rounding)
+        elif type(v)==dict:
+            for k2, v2 in v.items():
+                measures[k][k2] = round(v2, rounding)
+                
+    return measures
+
+
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Computes evaluation metrics for text anonymisation')
@@ -670,7 +737,7 @@ if __name__ == "__main__":
                         help='the path to the JSON file containing the gold standard annotations')
     parser.add_argument('masked_output_file', type=str, nargs="+",
                         help='the path to the JSON file containing the actual spans masked by the system')
-    parser.add_argument('--use_bert', dest='token_weighting', action='store_const', const="bert", default="uniform", 
+    parser.add_argument('--use_bert', dest="use_bert", default=False, action="store_true",
                         help='use BERT to compute the information content of each content (default: disable weighting)')
     parser.add_argument("--only_docs", dest="only_docs", default=None, nargs="*",
                        help="list of document identifiers on which to focus the evaluation " +
@@ -680,52 +747,23 @@ if __name__ == "__main__":
     args = parser.parse_args() 
 
     gold_corpus = GoldCorpus(args.gold_standard_file)
+    masked_docs = get_masked_docs_from_file(args.masked_output_file)
+    if args.only_docs:
+        masked_docs = [doc for doc in masked_docs if doc.doc_id in args.only_docs]
     
-    for masked_output_file in args.masked_output_file:
-        print("=========")
-        masked_docs = get_masked_docs_from_file(masked_output_file)
-        
-        if args.only_docs:
-            masked_docs = [doc for doc in masked_docs if doc.doc_id in args.only_docs]
-        
-        for masked_doc in masked_docs:
-            if masked_doc.doc_id not in gold_corpus.documents:
-                raise RuntimeError("Document %s not present in gold corpus"%masked_doc.doc_id)
+    measures = evaluate(gold_corpus, masked_docs, use_bert=args.use_bert, verbose=args.verbose)
+    
+    print("==> Token-level recall on all identifiers: %.3f"%measures["token_recall"])
+    print("==> Token-level recall on all identifiers, factored by type:")
+    for ent_type, token_recall_for_ent_type in measures["token_recall_by_type"].items():
+        print("\t%s:%.3f"%(ent_type, token_recall_for_ent_type))
+    print("==> Mention-level recall on all identifiers: %.3f"%measures["mention_recall"])
+    print("==> Entity-level recall on direct identifiers: %.3f"%measures["recall_direct_entities"])
+    print("==> Entity-level recall on quasi identifiers: %.3f"%measures["recall_quasi_entities"])
+    print("==> Uniform token-level precision on all identifiers: %.3f"%measures["token_precision"])
+    print("==> Uniform mention-level precision on all identifiers: %.3f"%measures["mention_precision"])  
 
-        if args.verbose:
-            gold_corpus.show_false_negatives(masked_docs, True, True)
-        
-        print("Computing evaluation metrics for", masked_output_file, "(%i documents)"%len(masked_docs))
-        
-        token_recall = gold_corpus.get_recall(masked_docs, True, True, True)
-        token_recall_by_type = gold_corpus.get_recall_per_entity_type(masked_docs, True, True, True)
-        mention_recall = gold_corpus.get_recall(masked_docs, True, True, False)
-        recall_direct_entities = gold_corpus.get_entity_recall(masked_docs, True, False)
-        recall_quasi_entities = gold_corpus.get_entity_recall(masked_docs, False, True)
-        token_precision = gold_corpus.get_precision(masked_docs, UniformTokenWeighting())
-        mention_precision = gold_corpus.get_precision(masked_docs, UniformTokenWeighting(), False)  
-
-        print("==> Token-level recall on all identifiers: %.3f"%token_recall)
-        print("==> Token-level recall on all identifiers, factored by type:")
-        for ent_type, token_recall_for_ent_type in token_recall_by_type.items():
-            print("\t%s:%.3f"%(ent_type, token_recall_for_ent_type))
-        print("==> Mention-level recall on all identifiers: %.3f"%mention_recall)
-        print("==> Entity-level recall on direct identifiers: %.3f"%recall_direct_entities)
-        print("==> Entity-level recall on quasi identifiers: %.3f"%recall_quasi_entities)
-        print("==> Uniform token-level precision on all identifiers: %.3f"%token_precision)
-        print("==> Uniform mention-level precision on all identifiers: %.3f"%mention_precision)  
-                     
-        if args.token_weighting == "uniform":
-            weighting_scheme = UniformTokenWeighting()
-        elif args.token_weighting == "bert":
-            weighting_scheme = BertTokenWeighting()
-        else:
-            raise RuntimeError("Unrecognised weighting scheme:", args.token_weighting)
-        
-        if not type(weighting_scheme) == UniformTokenWeighting:
-            print("Weighting scheme:", args.token_weighting)              
-            weighted_token_precision = gold_corpus.get_precision(masked_docs, weighting_scheme)
-            weighted_mention_precision = gold_corpus.get_precision(masked_docs, weighting_scheme, False)
-            print("==> Weighted, token-level precision on all identifiers: %.3f"%weighted_token_precision)
-            print("==> Weighted, mention-level precision on all identifiers: %.3f"%weighted_mention_precision)
-        
+    if args.use_bert:
+        print("==> Weighted, token-level precision on all identifiers: %.3f"%measures["weighted_token_precision"])
+        print("==> Weighted, mention-level precision on all identifiers: %.3f"%measures["weighted_mention_precision"])
+    
